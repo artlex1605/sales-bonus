@@ -114,17 +114,35 @@ function analyzeSalesData(data, options) {
   }));
 }
 
-/* универсальный экспорт для браузера и Node (GitHub Actions) */
+/* ===== Универсальный экспорт для браузера и Node ===== */
+
+// Браузер: публикуем в window, если он есть
 if (typeof window !== "undefined") {
   window.calculateSimpleRevenue = calculateSimpleRevenue;
   window.calculateBonusByProfit = calculateBonusByProfit;
   window.analyzeSalesData = analyzeSalesData;
 }
 
+// Node / GitHub Actions:
+// 1) Экспорт-объект (под деструктуризацию)
+// 2) Экспорт-функция, возвращающая объект (под вызов)
+// 3) Дополнительно свойство default — на случай ESM-обёрток
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = {
+  const api = {
     calculateSimpleRevenue,
     calculateBonusByProfit,
     analyzeSalesData,
   };
+
+  // Функция-обёртка, которая возвращает api
+  function exported() { return api; }
+
+  // Сделаем exported также «объектом» с теми же полями
+  Object.assign(exported, api);
+
+  // Поставим default, если среда ожидает его
+  exported.default = api;
+
+  module.exports = exported;
 }
+
