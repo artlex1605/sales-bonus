@@ -145,6 +145,22 @@ function analyzeSalesData(data, options) {
 */
 
 // Экспортируем в глобальную область (на случай, если стартер так ожидает)
-window.calculateSimpleRevenue = calculateSimpleRevenue;
-window.calculateBonusByProfit = calculateBonusByProfit;
-window.analyzeSalesData = analyzeSalesData;
+// ---- универсальный экспорт (браузер + Node) ----
+const exported = {
+  calculateSimpleRevenue,
+  calculateBonusByProfit,
+  analyzeSalesData,
+};
+
+// Браузер: публикуем в window, если он есть
+if (typeof window !== "undefined") {
+  window.calculateSimpleRevenue = calculateSimpleRevenue;
+  window.calculateBonusByProfit = calculateBonusByProfit;
+  window.analyzeSalesData = analyzeSalesData;
+}
+
+// Node (GitHub Actions): экспортируем функцию, которая возвращает объект функций
+if (typeof module !== "undefined" && module.exports) {
+  module.exports = () => exported;
+}
+
