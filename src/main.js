@@ -1,43 +1,36 @@
-/* ========================
-   ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
-   ======================== */
-
 /**
- * Рассчитывает выручку по товарной позиции с учётом скидки.
- * @param {Object} purchase - строка из record.items
- * @param {Object} _product - товар из data.products (зарезервировано на будущее)
- * @returns {number} revenue
+ * Рассчитывает выручку по позиции с учётом скидки.
+ * @param {Object} purchase - элемент из record.items
+ * @param {Object} _product - товар из data.products (зарезервировано под расширение логики)
+ * @returns {number}
  */
 function calculateSimpleRevenue(purchase, _product) {
-  const { discount, sale_price, quantity } = purchase;
-  const discountLeft = 1 - (discount || 0) / 100; // остаток после скидки
-  return sale_price * quantity * discountLeft;
+  const { discount = 0, sale_price, quantity } = purchase;
+  const left = 1 - discount / 100; // доля, остающаяся после скидки
+  return sale_price * quantity * left;
 }
 
 /**
- * Рассчитывает бонус продавца по месту в рейтинге прибыли.
- * @param {number} index - позиция продавца в отсортированном массиве (0 — первый)
+ * Рассчитывает бонус продавца в зависимости от места по прибыли.
+ * 1 место — 15%, 2–3 — 10%, последние — 0%, остальные — 5%.
+ * @param {number} index - место в отсортированном массиве (0 — первый)
  * @param {number} total - всего продавцов
  * @param {Object} seller - объект статистики продавца (содержит profit)
- * @returns {number} bonus
+ * @returns {number}
  */
 function calculateBonusByProfit(index, total, seller) {
   const { profit } = seller;
-  if (index === 0) return profit * 0.15;                 // 1-е место: 15%
-  if (index === 1 || index === 2) return profit * 0.10;  // 2-е и 3-е: 10%
-  if (index === total - 1) return 0;                     // последнее место: 0%
-  return profit * 0.05;                                  // остальные: 5%
+  if (index === 0) return profit * 0.15;
+  if (index === 1 || index === 2) return profit * 0.10;
+  if (index === total - 1) return 0;
+  return profit * 0.05;
 }
 
-/* ========================
-   ГЛАВНАЯ ФУНКЦИЯ ОТЧЁТА
-   ======================== */
-
 /**
- * Строит отчёт по продавцам.
- * @param {Object} data - источник данных (customers, products, sellers, purchase_records)
- * @param {Object} options - зависимости { calculateRevenue, calculateBonus }
- * @returns {Array} отчёт по продавцам в требуемом формате
+ * Главная функция анализа данных и построения отчёта.
+ * @param {Object} data - { customers, products, sellers, purchase_records }
+ * @param {Object} options - { calculateRevenue, calculateBonus }
+ * @returns {Array}
  */
 function analyzeSalesData(data, options) {
   // --- Проверка входных данных
@@ -50,57 +43,45 @@ function analyzeSalesData(data, options) {
     throw new Error("Некорректные входные данные");
   }
 
-  // --- Получаем зависимости
+  // --- Проверка опций / зависимостей
   const { calculateRevenue, calculateBonus } = options || {};
   if (!calculateRevenue || !calculateBonus) {
     throw new Error("Отсутствуют функции расчёта выручки или бонуса");
   }
 
-  // --- Промежуточная статистика по продавцам
+  // --- Промежуточная структура статистики по продавцам
   const sellerStats = data.sellers.map((seller) => ({
     id: seller.id,
     name: `${seller.first_name} ${seller.last_name}`,
     revenue: 0,
     profit: 0,
-    sales_count: 0,
-    products_sold: {}
+    sales_count: 0,     // количество чеков
+    products_sold: {}   // агрегатор по SKU: количество
   }));
 
   // --- Индексы для быстрого доступа
-  const sellerIndex = Object.fromEntries(
-    sellerStats.map((s) => [s.id, s])
-  );
-  const productIndex = Object.fromEntries(
-    data.products.map((p) => [p.sku, p])
-  );
+  const sellerIndex = Object.fromEntries(sellerStats.map((s) => [s.id, s]));
+  const productIndex = Object.fromEntries(data.products.map((p) => [p.sku, p]));
 
-  // --- Подсчёты по всем чекам
+  // --- Обход всех чеков и позиций
   data.purchase_records.forEach((record) => {
     const seller = sellerIndex[record.seller_id];
     if (!seller) return;
 
-    // Увеличиваем количество продаж (по чекам)
+    // один чек = одна продажа
     seller.sales_count += 1;
 
-    // По каждой позиции считаем выручку и прибыль
     record.items.forEach((item) => {
       const product = productIndex[item.sku];
       if (!product) return;
 
-      // Себестоимость
-      const cost = product.purchase_price * item.quantity;
+      const cost = product.purchase_price * item.quantity;        // себестоимость
+      const revenue = calculateRevenue(item, product);             // выручка с учётом скидки
+      const profit = revenue - cost;                               // прибыль
 
-      // Выручка с учётом скидки
-      const revenue = calculateRevenue(item, product);
-
-      // Прибыль
-      const profit = revenue - cost;
-
-      // Накапливаем
       seller.revenue += revenue;
       seller.profit += profit;
 
-      // Учёт проданных товаров
       if (!seller.products_sold[item.sku]) {
         seller.products_sold[item.sku] = 0;
       }
@@ -108,10 +89,10 @@ function analyzeSalesData(data, options) {
     });
   });
 
-  // --- Сортируем продавцов по прибыли (по убыванию)
+  // --- Сортировка продавцов по прибыли (убывание)
   sellerStats.sort((a, b) => b.profit - a.profit);
 
-  // --- Назначаем бонусы и формируем топ-10 товаров
+  // --- Назначение бонусов и формирование топ-10 товаров
   sellerStats.forEach((seller, index) => {
     seller.bonus = calculateBonus(index, sellerStats.length, seller);
 
@@ -121,7 +102,7 @@ function analyzeSalesData(data, options) {
       .slice(0, 10);
   });
 
-  // --- Итоговый отчёт в нужном формате
+  // --- Итоговый отчёт
   return sellerStats.map((seller) => ({
     seller_id: seller.id,
     name: seller.name,
@@ -133,34 +114,17 @@ function analyzeSalesData(data, options) {
   }));
 }
 
-/* Если стартер вызывает analyzeSalesData сам — ничего не делаем.
-   Если нет — можно раскомментировать пример ниже:
-
-// const report = analyzeSalesData(data, {
-//   calculateRevenue: calculateSimpleRevenue,
-//   calculateBonus: calculateBonusByProfit
-// });
-// console.table(report);
-
-*/
-
-// Экспортируем в глобальную область (на случай, если стартер так ожидает)
-// ---- универсальный экспорт (браузер + Node) ----
-const exported = {
-  calculateSimpleRevenue,
-  calculateBonusByProfit,
-  analyzeSalesData,
-};
-
-// Браузер: публикуем в window, если он есть
+/* универсальный экспорт для браузера и Node (GitHub Actions) */
 if (typeof window !== "undefined") {
   window.calculateSimpleRevenue = calculateSimpleRevenue;
   window.calculateBonusByProfit = calculateBonusByProfit;
   window.analyzeSalesData = analyzeSalesData;
 }
 
-// Node (GitHub Actions): экспортируем функцию, которая возвращает объект функций
 if (typeof module !== "undefined" && module.exports) {
-  module.exports = () => exported;
+  module.exports = {
+    calculateSimpleRevenue,
+    calculateBonusByProfit,
+    analyzeSalesData,
+  };
 }
-
