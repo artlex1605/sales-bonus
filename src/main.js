@@ -33,7 +33,7 @@ function calculateBonusByProfit(index, total, seller) {
  * @returns {Array}
  */
 function analyzeSalesData(data, options) {
-  // --- Проверка входных данных
+  // Проверка входных данных
   if (
     !data ||
     !Array.isArray(data.sellers) || data.sellers.length === 0 ||
@@ -43,13 +43,13 @@ function analyzeSalesData(data, options) {
     throw new Error("Некорректные входные данные");
   }
 
-  // --- Проверка опций / зависимостей
+  // Проверка опций / зависимостей
   const { calculateRevenue, calculateBonus } = options || {};
   if (!calculateRevenue || !calculateBonus) {
     throw new Error("Отсутствуют функции расчёта выручки или бонуса");
   }
 
-  // --- Промежуточная структура статистики по продавцам
+  // Промежуточная структура статистики по продавцам
   const sellerStats = data.sellers.map((seller) => ({
     id: seller.id,
     name: `${seller.first_name} ${seller.last_name}`,
@@ -59,11 +59,11 @@ function analyzeSalesData(data, options) {
     products_sold: {}   // агрегатор по SKU: количество
   }));
 
-  // --- Индексы для быстрого доступа
+  // Индексы для быстрого доступа
   const sellerIndex = Object.fromEntries(sellerStats.map((s) => [s.id, s]));
   const productIndex = Object.fromEntries(data.products.map((p) => [p.sku, p]));
 
-  // --- Обход всех чеков и позиций
+  // Обход всех чеков и позиций
   data.purchase_records.forEach((record) => {
     const seller = sellerIndex[record.seller_id];
     if (!seller) return;
@@ -71,17 +71,22 @@ function analyzeSalesData(data, options) {
     // один чек = одна продажа
     seller.sales_count += 1;
 
+    // ВЫРУЧКА С УРОВНЯ ЧЕКА (а не суммой по позициям)
+    // total_amount — сумма без скидок, total_discount — скидка рублями
+    seller.revenue += (record.total_amount - record.total_discount);
+
+    // Прибыль считаем по позициям
     record.items.forEach((item) => {
       const product = productIndex[item.sku];
       if (!product) return;
 
-      const cost = product.purchase_price * item.quantity;        // себестоимость
-      const revenue = calculateRevenue(item, product);             // выручка с учётом скидки
-      const profit = revenue - cost;                               // прибыль
+      const cost = product.purchase_price * item.quantity;     // себестоимость
+      const revenue = calculateRevenue(item, product);          // позиционная выручка
+      const profit = revenue - cost;                            // прибыль
 
-      seller.revenue += revenue;
       seller.profit += profit;
 
+      // учёт проданных товаров
       if (!seller.products_sold[item.sku]) {
         seller.products_sold[item.sku] = 0;
       }
@@ -89,10 +94,10 @@ function analyzeSalesData(data, options) {
     });
   });
 
-  // --- Сортировка продавцов по прибыли (убывание)
+  // Сортировка продавцов по прибыли (убывание)
   sellerStats.sort((a, b) => b.profit - a.profit);
 
-  // --- Назначение бонусов и формирование топ-10 товаров
+  // Назначение бонусов и формирование топ-10 товаров
   sellerStats.forEach((seller, index) => {
     seller.bonus = calculateBonus(index, sellerStats.length, seller);
 
@@ -102,7 +107,7 @@ function analyzeSalesData(data, options) {
       .slice(0, 10);
   });
 
-  // --- Итоговый отчёт
+  // Итоговый отчёт
   return sellerStats.map((seller) => ({
     seller_id: seller.id,
     name: seller.name,
@@ -116,17 +121,14 @@ function analyzeSalesData(data, options) {
 
 /* ===== Универсальный экспорт для браузера и Node ===== */
 
-// Браузер: публикуем в window, если он есть
+// Браузер
 if (typeof window !== "undefined") {
   window.calculateSimpleRevenue = calculateSimpleRevenue;
   window.calculateBonusByProfit = calculateBonusByProfit;
   window.analyzeSalesData = analyzeSalesData;
 }
 
-// Node / GitHub Actions:
-// 1) Экспорт-объект (под деструктуризацию)
-// 2) Экспорт-функция, возвращающая объект (под вызов)
-// 3) Дополнительно свойство default — на случай ESM-обёрток
+// Node / GitHub Actions
 if (typeof module !== "undefined" && module.exports) {
   const api = {
     calculateSimpleRevenue,
@@ -134,15 +136,12 @@ if (typeof module !== "undefined" && module.exports) {
     analyzeSalesData,
   };
 
-  // Функция-обёртка, которая возвращает api
+  // Вариант 1: require('../src/main.js')
+  // Вариант 2: const { analyzeSalesData } = require('../src/main.js')
+  // Вариант 3: const get = require('../src/main.js'); const { analyzeSalesData } = get();
   function exported() { return api; }
-
-  // Сделаем exported также «объектом» с теми же полями
   Object.assign(exported, api);
-
-  // Поставим default, если среда ожидает его
   exported.default = api;
 
   module.exports = exported;
 }
-
